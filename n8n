@@ -21,6 +21,15 @@ services:
       - coolify
     ports:
       - '5678:5678'
+  ffmpeg-api:
+    image: kazhar/ffmpeg-api:latest
+    environment:
+      - FILE_SIZE_LIMIT_BYTES=524288000  # 500MB
+    networks:
+      - coolify
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
 
 networks:
   coolify:
