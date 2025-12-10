@@ -1,3 +1,84 @@
+#!/bin/bash
+
+#############################################
+# N8N BACKUP AUTO INSTALLER
+# Tự động cài đặt và cấu hình backup service
+#############################################
+
+set -euo pipefail
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+BOLD='\033[1m'
+
+print_header() {
+    clear
+    echo -e "${CYAN}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${NC}  ${BOLD}N8N BACKUP SERVICE - AUTO INSTALLER${NC}                   ${CYAN}║${NC}"
+    echo -e "${CYAN}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+log_step() {
+    echo -e "${BLUE}➤${NC} ${BOLD}$1${NC}"
+}
+
+log_success() {
+    echo -e "${GREEN}✓${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}✗${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}⚠${NC} $1"
+}
+
+# Check if running as root
+check_root() {
+    if [ "$EUID" -ne 0 ]; then 
+        log_error "Script này cần chạy với quyền root (sudo)"
+        exit 1
+    fi
+    log_success "Đang chạy với quyền root"
+}
+
+# Check if Docker is installed
+check_docker() {
+    log_step "Kiểm tra Docker..."
+    if ! command -v docker &> /dev/null; then
+        log_error "Docker chưa được cài đặt!"
+        exit 1
+    fi
+    log_success "Docker đã được cài đặt"
+}
+
+# Check if n8n container exists
+check_n8n_container() {
+    log_step "Tìm kiếm n8n container..."
+    CONTAINER=$(docker ps --filter "name=n8n" --format "{{.Names}}" | head -n 1)
+    
+    if [ -z "$CONTAINER" ]; then
+        log_error "Không tìm thấy n8n container đang chạy!"
+        echo ""
+        echo "Danh sách containers đang chạy:"
+        docker ps --format "table {{.Names}}\t{{.Status}}"
+        exit 1
+    fi
+    log_success "Tìm thấy n8n container: $CONTAINER"
+}
+
+# Create main backup script
+create_backup_script() {
+    log_step "Tạo script backup chính..."
+    
+    cat > /usr/local/bin/n8n-backup.sh << 'EOF'
 #!/usr/bin/env bash
 
 # ==========================
@@ -126,4 +207,102 @@ main() {
     done
 }
 
+main
+EOF
+
+    chmod +x /usr/local/bin/n8n-backup.sh
+    log_success "Đã tạo script backup tại /usr/local/bin/n8n-backup.sh"
+}
+
+# Create systemd service
+create_systemd_service() {
+    log_step "Tạo systemd service..."
+    
+    cat > /etc/systemd/system/n8n-backup.service << 'EOF'
+[Unit]
+Description=N8N Automatic Backup Service
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/n8n-backup.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    log_success "Đã tạo systemd service"
+}
+
+# Enable and start service
+enable_service() {
+    log_step "Kích hoạt service..."
+    
+    systemctl daemon-reload
+    log_success "Đã reload systemd daemon"
+    
+    systemctl enable n8n-backup.service
+    log_success "Đã enable service (tự động chạy khi boot)"
+    
+    systemctl start n8n-backup.service
+    log_success "Đã khởi động service"
+}
+
+# Show status
+show_final_status() {
+    echo ""
+    echo -e "${GREEN}${BOLD}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}${BOLD}║${NC}  ${BOLD}CÀI ĐẶT HOÀN TẤT!${NC}                                        ${GREEN}${BOLD}║${NC}"
+    echo -e "${GREEN}${BOLD}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${BOLD}📋 Thông tin service:${NC}"
+    echo -e "   Service name:    ${CYAN}n8n-backup.service${NC}"
+    echo -e "   Backup location: ${CYAN}/home/minhnc/Desktop/n8n-backup${NC}"
+    echo -e "   Interval:        ${CYAN}Mỗi 60 phút${NC}"
+    echo ""
+    echo -e "${BOLD}🔧 Các lệnh hữu ích:${NC}"
+    echo -e "   ${CYAN}sudo systemctl status n8n-backup${NC}     - Xem trạng thái"
+    echo -e "   ${CYAN}sudo journalctl -u n8n-backup -f${NC}     - Xem log real-time"
+    echo -e "   ${CYAN}sudo systemctl restart n8n-backup${NC}    - Khởi động lại"
+    echo -e "   ${CYAN}sudo systemctl stop n8n-backup${NC}       - Dừng service"
+    echo -e "   ${CYAN}sudo nano /usr/local/bin/n8n-backup.sh${NC} - Chỉnh sửa cấu hình"
+    echo ""
+    echo -e "${BOLD}📊 Trạng thái hiện tại:${NC}"
+    systemctl status n8n-backup.service --no-pager | head -n 10
+    echo ""
+    echo -e "${GREEN}✓ Service đang chạy và sẽ tự động backup mỗi giờ!${NC}"
+    echo ""
+}
+
+# Main installation flow
+main() {
+    print_header
+    
+    echo -e "${BOLD}Bắt đầu cài đặt N8N Backup Service...${NC}"
+    echo ""
+    
+    check_root
+    check_docker
+    check_n8n_container
+    
+    echo ""
+    log_step "Tiến hành cài đặt..."
+    echo ""
+    
+    create_backup_script
+    create_systemd_service
+    enable_service
+    
+    sleep 2  # Wait for service to start
+    
+    show_final_status
+}
+
+# Run main
 main
